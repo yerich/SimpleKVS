@@ -21,21 +21,24 @@ union OrderedMapNodeValue {
 template<typename K, typename V>
 	requires std::totally_ordered<K>
 class OrderedMapNode {
+	// A node in the B+ tree
+	// Note: for branch nodes, the first key is used to store the minimum value
+	// contained within the subtree.
 public:
 	size_t mSize;
 	bool mIsLeafNode;
 	OrderedMapNodeValue<K, V>* mValues;
 	K* mKeys;
 	OrderedMapNode* mNext;
-	bool mIsDeleted;
+	bool* mIsDeleted;
 
 	OrderedMapNode(size_t branchingFactor=DEFAULT_BRANCHING_FACTOR) : 
 		mSize{ 0 }, 
 		mIsLeafNode{ true },
-		mKeys{ new K[branchingFactor+1] },
-		mValues{ new OrderedMapNodeValue<K, V>[branchingFactor+1] },
+		mKeys{ new K[branchingFactor] },
+		mValues{ new OrderedMapNodeValue<K, V>[branchingFactor] },
 		mNext { nullptr },
-		mIsDeleted { false }
+		mIsDeleted { new bool[branchingFactor] }
 	{};
 	OrderedMapNode(const OrderedMapNode& other) = delete;
 	OrderedMapNode(OrderedMapNode&& other) :
@@ -43,7 +46,7 @@ public:
 		mIsLeafNode{ true },
 		mKeys{ nullptr },
 		mNext{ nullptr },
-		mIsDeleted{ false }
+		mIsDeleted{ nullptr }
 	{
 		swap(*this, other);
 	}
@@ -64,39 +67,58 @@ public:
 		std::swap(a.mNext, b.mNext);
 	}
 
-	OrderedMapNode* setValue(K key, OrderedMapNodeValue<K, V> value, size_t branchingFactor);
+	OrderedMapNode* set_value(K key, OrderedMapNodeValue<K, V> value, size_t branchingFactor);
 
-	void print(int depth = 0)
+	void print(std::ostream& out = std::cout, int depth = 0)
 	{
 		if (depth == 0) {
-			std::cout << "== BEGIN TREE ==" << std::endl;
+			out << "== BEGIN TREE ==" << std::endl;
 		}
 		if (mIsLeafNode) {
 			for (size_t i = 0; i < mSize; i++) {
-				for (int j = 0; j < depth; j++) std::cout << "    ";
-				std::cout << mKeys[i] << ": " << mValues[i].value << std::endl;
+				for (int j = 0; j < depth; j++) out << "    ";
+				out << mKeys[i] << ": " << mValues[i].value << std::endl;
 			}
 		}
 		else {
 			for (size_t i = 0; i < mSize; i++) {
-				for (int j = 0; j < depth; j++) std::cout << "    ";
+				for (int j = 0; j < depth; j++) out << "    ";
 				if (i == 0)
-					std::cout << " (" << mKeys[i] << ")" << std::endl;
+					out << " (" << mKeys[i] << ")" << std::endl;
 				else
-					std::cout << "> " << mKeys[i] << std::endl;
-				mValues[i].node->print(depth + 1);
+					out << "> " << mKeys[i] << std::endl;
+				mValues[i].node->print(out, depth + 1);
 			}
 		}
 		if (depth == 0) {
-			std::cout << "== END TREE ==" << std::endl;
+			out << "== END TREE ==" << std::endl;
 		}
 	}
 
-	K minKey() {
+	// For a given key, return the index of the subtree that would contain the key.
+	size_t child_position(K key) const {
+		if (mSize <= 1 || key < mKeys[1]) return 0;
+
+		size_t left = 1;
+		size_t right = mSize - 1;
+		size_t mid;
+		while (right > left) {
+			mid = (left + right + 1) / 2;
+			if (key < mKeys[mid]) {
+				right = mid - 1;
+			}
+			else {
+				left = mid;
+			}
+		}
+		return left;  
+	}
+
+	K min_key() {
 		if (mIsLeafNode) {
 			return mKeys[0];
 		}
-		return mValues[0].node->minKey();
+		return mValues[0].node->min_key();
 	}
 
 	~OrderedMapNode() {
@@ -119,27 +141,63 @@ template<typename K, typename V>
 class OrderedMap
 {
 public:
-	//struct Iterator {
-	//public:
-	//	using iterator_category = std::forward_iterator_tag;
-	//	using difference_type = std::ptrdiff_t;
-	//	using value_type = struct { K& first; V& second; };
-	//	using pointer = value_type*;
-	//	using reference = value_type&;
+	struct Iterator {
+	public:
+		using iterator_category = std::forward_iterator_tag;
+		using difference_type = std::ptrdiff_t;
+		using value_type = struct { K& first; V& second; bool isDeleted; };
+		using pointer = value_type*;
+		using reference = value_type&; 
 
-	//	Iterator(K& key, V& value) : ptr{ value_type { key, value } } {};
-	//	reference operator*() { return ptr; }
-	//	pointer operator->() { return &ptr; }
+		Iterator(K& key, V& value, const OrderedMapNode<K, V>* parent) : 
+			ptr{ value_type { key, value, false } },
+			parent { parent },
+			keyIndex { 0 }
+		{
+			if (!parent) return;
+			for (size_t i = 0; i < parent->mSize; i++) {
+				if (parent->mKeys[i] == key) {
+					keyIndex = i;
+				}
+			}
+		};
+		reference operator*() { return ptr; }
+		pointer operator->() { return &ptr; }
 
-	//	Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
-	//	Iterator& operator++() 
-	//	{ 
-	//		ptr;
-	//		return *this; 
-	//	}
+		Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+		Iterator& operator++() 
+		{ 
+			if (keyIndex < parent->mSize - 1) {
+				keyIndex += 1;
+			}
+			else if (parent->mNext) {
+				parent = parent->mNext;
+				keyIndex = 0;
+			}
+			else {
+				parent = nullptr;
+				return *this;
+			}
+			ptr.first = parent->mKeys[keyIndex];
+			ptr.second = parent->mValues[keyIndex].value;
+			return *this; 
+		}
 
-	//	value_type ptr;
-	//};
+		friend bool operator== (const Iterator& a, const Iterator& b) 
+		{
+			if (a.parent == nullptr && b.parent == nullptr) return true;
+			return a.parent == b.parent && a.keyIndex == b.keyIndex;
+		};
+		friend bool operator!= (const Iterator& a, const Iterator& b) 
+		{
+			if (a.parent == nullptr && b.parent == nullptr) return false;
+			return a.parent != b.parent || a.keyIndex != b.keyIndex;
+		};
+
+		value_type ptr;
+		const OrderedMapNode<K, V>* parent;
+		size_t keyIndex;
+	};
 
 	OrderedMap(size_t branchingFactor=DEFAULT_BRANCHING_FACTOR) :
 		mRoot{ new OrderedMapNode<K, V>(branchingFactor) },
@@ -168,17 +226,54 @@ public:
 		swap(a.mBranchingFactor, b.mBranchingFactor);
 	};
 
-	Iterator begin() 
+	Iterator begin() const 
 	{
+		if (mRoot->mSize == 0) return end();
 		auto curr = mRoot;
 		while (!curr->mIsLeafNode) curr = curr->mValues[0].node;
-		return Iterator(curr->mKeys[0], curr->mValues[0].value);
+		return Iterator(curr->mKeys[0], curr->mValues[0].value, curr);
+	}
+
+	Iterator end() const
+	{
+		return Iterator(mRoot->mKeys[0], mRoot->mValues[0].value, nullptr);
+	}
+
+	V& at(K key) const 
+	{
+		auto curr = mRoot;
+		while (true) {
+			if (!curr || curr->mSize == 0) throw std::out_of_range("Value not found");
+			if (!curr->mIsLeafNode) {
+				size_t i = curr->child_position(key);
+				curr = curr->mValues[i].node;
+			}
+			else {
+				size_t left = 0;
+				size_t right = curr->mSize - 1;
+				size_t mid;
+
+				while (left <= right) {
+					mid = (left + right) / 2;
+					if (key == curr->mKeys[mid]) {
+						return curr->mValues[mid].value;
+					}
+					else if (key < curr->mKeys[mid]) {
+						right = mid - 1;
+					}
+					else {
+						left = mid + 1;
+					}
+				}
+				throw std::out_of_range("Value not found");
+			}
+		}
 	}
 
 	void set(K key, V value); 
-	void print()
+	void print(std::ostream& out = std::cout) const
 	{
-		mRoot->print();
+		mRoot->print(out);
 	}
 
 	V& operator[](const K& key) const {}
@@ -190,7 +285,7 @@ private:
 
 template<typename K, typename V>
 	requires std::totally_ordered<K>
-OrderedMapNode<K, V>* OrderedMapNode<K, V>::setValue(K key, OrderedMapNodeValue<K, V> value, size_t branchingFactor)
+OrderedMapNode<K, V>* OrderedMapNode<K, V>::set_value(K key, OrderedMapNodeValue<K, V> value, size_t branchingFactor)
 {
 	// linear-time insertion
 	// First determine the insertion point
@@ -224,7 +319,7 @@ OrderedMapNode<K, V>* OrderedMapNode<K, V>::setValue(K key, OrderedMapNodeValue<
 				for (size_t j = half - 2; j >= i; j--) {
 					mKeys[j + 1] = mKeys[j];
 					mValues[j + 1] = mValues[j];
-					if (j <= i) break; // prevent negative integer overflow
+					if (j == 0) break; // prevent negative integer overflow
 				}
 			}
 			// Insert the new value in the first half
@@ -269,7 +364,7 @@ OrderedMapNode<K, V>* OrderedMapNode<K, V>::setValue(K key, OrderedMapNodeValue<
 			for (size_t j = mSize - 1; j >= i; j--) {
 				mKeys[j + 1] = mKeys[j];
 				mValues[j + 1] = mValues[j];
-				if (j <= i) break;	// prevent negative integer overflow
+				if (j == 0) break;	// prevent negative integer overflow
 			}
 		}
 		mKeys[i] = key;
@@ -297,15 +392,14 @@ void OrderedMap<K, V>::set(K key, V value)
 
 	while (!curr->mIsLeafNode) {
 		i += 1;
-		size_t j = 1;
-		for (; j < curr->mSize && curr->mKeys[j] <= key; j++);
+		size_t j = curr->child_position(key);
 
-		curr->mKeys[j - 1] = std::min(curr->mKeys[j - 1], key);
-		curr = curr->mValues[j - 1].node;
+		curr->mKeys[j] = std::min(curr->mKeys[j], key);
+		curr = curr->mValues[j].node;
 		stack[i] = curr;
 	};
 
-	OrderedMapNode<K, V>* newNode = curr->setValue(key, newValue, mBranchingFactor);
+	OrderedMapNode<K, V>* newNode = curr->set_value(key, newValue, mBranchingFactor);
 
 	if (!newNode) {
 		return;
@@ -314,10 +408,9 @@ void OrderedMap<K, V>::set(K key, V value)
 	while (i > 0 && newNode) {
 		i -= 1;
 		OrderedMapNode<K, V>* parent = stack[i];
-		K newKey = newNode->minKey();
-		// TODO set mNext
+		K newKey = newNode->min_key();
 		newValue = std::move(OrderedMapNodeValue<K, V> {.node = newNode });
-		newNode = parent->setValue(newKey, newValue, mBranchingFactor);
+		newNode = parent->set_value(newKey, newValue, mBranchingFactor);
 	}
 
 	if (i == 0 && newNode) {
@@ -326,8 +419,8 @@ void OrderedMap<K, V>::set(K key, V value)
 		newRoot->mIsLeafNode = false;
 		newRoot->mValues[0].node = mRoot;
 		newRoot->mValues[1].node = newNode;
-		newRoot->mKeys[0] = mRoot->minKey();
-		newRoot->mKeys[1] = newNode->minKey();
+		newRoot->mKeys[0] = mRoot->min_key();
+		newRoot->mKeys[1] = newNode->min_key();
 
 		if (mRoot->mIsLeafNode)
 			mRoot->mNext = newNode;

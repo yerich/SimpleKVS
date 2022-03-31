@@ -2,7 +2,7 @@
 #include "OrderedMap.h"
 
 int main() {
-	OrderedMap<int, int> test = OrderedMap<int, int>(5);
+	OrderedMap<int, int> test = OrderedMap<int, int>(50);
 	DEBUG_MODE = true;
 	test.set(10, 20);
 	test.set(20, 20);
@@ -23,5 +23,8 @@ int main() {
 	test.set(7, 20);
 	test.set(57, 4444);
 	test.print();
+	for (auto&& [key, value, _] : test) {
+		std::cout << key << ": " << value << std::endl;
+	}
 	return 0;
 }
