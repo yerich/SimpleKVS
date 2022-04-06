@@ -3,7 +3,7 @@
 #include <iostream>
 #include <stdexcept>
 
-#define DEFAULT_BRANCHING_FACTOR 3
+constexpr size_t DEFAULT_BRANCHING_FACTOR = 3;
 
 bool DEBUG_MODE = false;
 
@@ -46,23 +46,20 @@ public:
 	OrderedMapNodeChild<K, V>* mChildren;
 	K* mKeys;
 	OrderedMapNode* mNext;
-	char* mIsDeleted; // bitmap
 
 	OrderedMapNode(size_t branchingFactor=DEFAULT_BRANCHING_FACTOR) : 
 		mSize{ 0 }, 
 		mIsLeafNode{ true },
 		mKeys{ new K[branchingFactor] },
 		mChildren{ new OrderedMapNodeChild<K, V>[branchingFactor] },
-		mNext { nullptr },
-		mIsDeleted { new char[(branchingFactor + 7) / 8] }
+		mNext { nullptr }
 	{};
 	OrderedMapNode(const OrderedMapNode& other) = delete;
 	OrderedMapNode(OrderedMapNode&& other) :
 		mSize{ 0 },
 		mIsLeafNode{ true },
 		mKeys{ nullptr },
-		mNext{ nullptr },
-		mIsDeleted{ nullptr }
+		mNext{ nullptr }
 	{
 		swap(*this, other);
 	}
@@ -137,14 +134,15 @@ public:
 		return mChildren[0].node->min_key();
 	}
 
-	bool is_key_deleted() {
-
-	}
-
 	~OrderedMapNode() {
 		if (!mIsLeafNode) {
 			for (size_t i = 0; i < mSize; i++) {
 				delete mChildren[i].node;
+			}
+		}
+		else {
+			for (size_t i = 0; i < mSize; i++) {
+				mChildren[i].value.OrderedMapNodeValue<V>::~OrderedMapNodeValue();
 			}
 		}
 		delete[] mChildren;
@@ -224,7 +222,7 @@ public:
 		mHeight { 1 }
 	{};
 	OrderedMap(const OrderedMap& other) = delete;
-	OrderedMap(OrderedMap&& other) : OrderedMap()
+	OrderedMap(OrderedMap&& other) noexcept : OrderedMap()
 	{
 		swap(*this, other);
 	};
@@ -440,7 +438,7 @@ void OrderedMap<K, V>::set(K key, V value)
 
 	stack[0] = mRoot;
 	size_t i = 0;
-	OrderedMapNode<K, V>* curr = stack[0];
+	OrderedMapNode<K, V>* curr = mRoot;
 
 	while (!curr->mIsLeafNode) {
 		i += 1;
@@ -454,6 +452,7 @@ void OrderedMap<K, V>::set(K key, V value)
 	OrderedMapNode<K, V>* newNode = curr->set_value(key, newValue, mBranchingFactor);
 
 	if (!newNode) {
+		delete[] stack;
 		return;
 	}
 

@@ -7,6 +7,12 @@
 #include <random>
 #include <map>
 
+#include "windows.h"
+#define _CRTDBG_MAP_ALLOC //to get more details
+#include <stdlib.h>  
+#include <crtdbg.h>   //for malloc and free
+
+
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 long lrand()
@@ -76,6 +82,13 @@ namespace UnitTest
 			for (int64_t key : { 0, 12442, 45987, 166234, 621115 }) {
 				Assert::AreEqual(test.at(key), key);
 			}
+
+			int64_t acc = 0;
+			for (auto const& [key, value, _] : test) {
+				acc += key;
+			}
+
+			Assert::AreEqual(acc, (int64_t)499999500000);
 			Assert::AreEqual(test.at(size-1), size-1);
 		}
 
@@ -92,6 +105,13 @@ namespace UnitTest
 			for (int64_t key : { 0, 12442, 45987, 166234, 621115 }) {
 				Assert::AreEqual(test.at(key), key);
 			}
+
+			int64_t acc = 0;
+			for (auto const& [key, value] : test) {
+				acc += key;
+			}
+
+			Assert::AreEqual(acc, (int64_t)499999500000);
 			Assert::AreEqual(test.at(0), (int64_t) 0);
 			Assert::AreEqual(test.at(size - 1), size - 1);
 		}
@@ -195,6 +215,38 @@ namespace UnitTest
 			OrderedMap test = OrderedMap<int64_t, std::string>(10);
 			test.set(10, "Hello");
 			Assert::ExpectException<std::out_of_range>([&test] { test.at(12); });
+		}
+
+		TEST_METHOD(MemoryLeak)
+		{
+			_CrtMemState sOld;
+			_CrtMemState sNew;
+			_CrtMemState sDiff;
+			_CrtMemCheckpoint(&sOld); //take a snapshot
+
+			auto* test = new OrderedMap<int64_t, std::string>(10);
+
+			int64_t size = 10000;
+
+			for (int64_t i = 0; i < size; i++) {
+				test->set(i, "hello");
+			}
+
+			delete test;
+
+			_CrtMemCheckpoint(&sNew); //take a snapshot 
+			Assert::IsFalse(_CrtMemDifference(&sDiff, &sOld, &sNew));
+			/*
+			if (_CrtMemDifference(&sDiff, &sOld, &sNew)) // if there is a difference
+			{
+				OutputDebugString(L"-----------_CrtMemDumpStatistics ---------");
+				_CrtMemDumpStatistics(&sDiff);
+				OutputDebugString(L"-----------_CrtMemDumpAllObjectsSince ---------");
+				_CrtMemDumpAllObjectsSince(&sOld);
+				OutputDebugString(L"-----------_CrtDumpMemoryLeaks ---------");
+				_CrtDumpMemoryLeaks();
+			}
+			*/
 		}
 	private:
 		template<typename K, typename V>
