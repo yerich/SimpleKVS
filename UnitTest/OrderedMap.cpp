@@ -67,13 +67,13 @@ namespace UnitTest
 		{
 			OrderedMap<int64_t, int64_t> test = OrderedMap<int64_t, int64_t>(100);
 
-			int64_t size = 10'000'000;
+			int64_t size = 1'000'000;
 
 			for (int64_t i = 0; i < size; i++) {
 				test.set(i, i);
 			}
 
-			for (int64_t key : { 0, 12442, 45987, 166234, 6521115 }) {
+			for (int64_t key : { 0, 12442, 45987, 166234, 621115 }) {
 				Assert::AreEqual(test.at(key), key);
 			}
 			Assert::AreEqual(test.at(size-1), size-1);
@@ -83,15 +83,16 @@ namespace UnitTest
 		{
 			std::map<int64_t, int64_t> test = std::map<int64_t, int64_t>();
 
-			int64_t size = 10'000'000;
+			int64_t size = 1'000'000;
 
 			for (int64_t i = 0; i < size; i++) {
 				test[i] = i;
 			}
 
-			for (int64_t key : { 0, 12442, 45987, 166234, 6521115 }) {
+			for (int64_t key : { 0, 12442, 45987, 166234, 621115 }) {
 				Assert::AreEqual(test.at(key), key);
 			}
+			Assert::AreEqual(test.at(0), (int64_t) 0);
 			Assert::AreEqual(test.at(size - 1), size - 1);
 		}
 
@@ -115,6 +116,85 @@ namespace UnitTest
 			Assert::AreEqual(root->child_position(59), (size_t)4);
 			Assert::AreEqual(root->child_position(60), (size_t)5);
 			Assert::AreEqual(root->child_position(100), (size_t)5);
+		}
+
+		TEST_METHOD(DeleteValue)
+		{
+			OrderedMap<int, int> test = OrderedMap<int, int>(3);
+
+			std::vector<int> keys = { 1, 2, 3, 4, 5, 6, 7 };
+
+			for (auto k : keys) {
+				test.set(k, k);
+			}
+
+			for (auto k : keys) {
+				Assert::AreEqual(k, test.at(k));
+			}
+
+			Assert::IsTrue(test.del(3));
+			Assert::IsFalse(test.del(300));
+
+			bool isDeleted = false;
+			Assert::AreEqual(3, test.at(3, &isDeleted));
+			Assert::IsTrue(isDeleted);
+
+			test.set(3, 3);
+			Assert::AreEqual(3, test.at(3, &isDeleted));
+			Assert::IsFalse(isDeleted);
+		}
+
+		TEST_METHOD(DeletedValueIterator)
+		{
+			OrderedMap<int, int> test = OrderedMap<int, int>(3);
+
+			std::vector<int> keys = { 1, 2, 3, 4, 5, 6, 7 };
+
+			for (auto k : keys) {
+				test.set(k, k);
+			}
+			
+			for (auto const& [key, value, isDeleted] : test) {
+				Assert::AreEqual(key, value);
+				Assert::IsFalse(isDeleted);
+			}
+
+			std::ostringstream output_buffer;
+			output_buffer << keys.size() << std::endl;
+			test.print(output_buffer);
+			Logger::WriteMessage(output_buffer.str().c_str());
+
+			for (auto k : keys) {
+				Assert::IsTrue(test.del(k));
+			}
+
+			for (auto const& [key, value, isDeleted] : test) {
+				Assert::AreEqual(key, value);
+				Assert::IsTrue(isDeleted);
+			}
+		}
+
+		TEST_METHOD(Strings)
+		{
+			OrderedMap test = OrderedMap<int64_t, std::string>(100);
+
+			int64_t size = 1000;
+
+			for (int64_t i = 0; i < size; i++) {
+				test.set(i, std::to_string(i));
+			}
+
+			for (int64_t key : { 0, 12, 24, 35 }) {
+				Assert::AreEqual(test.at(key), std::to_string(key));
+			}
+			Assert::AreEqual(test.at(0), std::to_string(0));
+		}
+
+		TEST_METHOD(OutOfBounds)
+		{
+			OrderedMap test = OrderedMap<int64_t, std::string>(10);
+			test.set(10, "Hello");
+			Assert::ExpectException<std::out_of_range>([&test] { test.at(12); });
 		}
 	private:
 		template<typename K, typename V>

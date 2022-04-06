@@ -11,11 +11,27 @@ template<typename K, typename V>
 	requires std::totally_ordered<K>
 class OrderedMapNode;
 
+template<typename V>
+struct OrderedMapNodeValue {
+	bool isDeleted;
+	V value;
+};
+
 template<typename K, typename V>
 	requires std::totally_ordered<K>
-union OrderedMapNodeValue {
+union OrderedMapNodeChild {
 	OrderedMapNode<K, V>* node;
-	V value;
+	OrderedMapNodeValue<V> value;
+	OrderedMapNodeChild() : node{ nullptr } {};
+	OrderedMapNodeChild(OrderedMapNode<K, V>* node) : node{ node } {};
+	OrderedMapNodeChild(OrderedMapNodeValue<V> value) : value{ value } {};
+	OrderedMapNodeChild(const OrderedMapNodeChild<K, V>& other) { memcpy(this, &other, sizeof(OrderedMapNodeChild<K, V>)); };
+	OrderedMapNodeChild& operator=(const OrderedMapNodeChild& other)
+	{
+		memcpy(this, &other, sizeof(OrderedMapNodeChild<K, V>));
+		return *this;
+	};
+	~OrderedMapNodeChild() {};
 };
 
 template<typename K, typename V>
@@ -27,18 +43,18 @@ class OrderedMapNode {
 public:
 	size_t mSize;
 	bool mIsLeafNode;
-	OrderedMapNodeValue<K, V>* mValues;
+	OrderedMapNodeChild<K, V>* mChildren;
 	K* mKeys;
 	OrderedMapNode* mNext;
-	bool* mIsDeleted;
+	char* mIsDeleted; // bitmap
 
 	OrderedMapNode(size_t branchingFactor=DEFAULT_BRANCHING_FACTOR) : 
 		mSize{ 0 }, 
 		mIsLeafNode{ true },
 		mKeys{ new K[branchingFactor] },
-		mValues{ new OrderedMapNodeValue<K, V>[branchingFactor] },
+		mChildren{ new OrderedMapNodeChild<K, V>[branchingFactor] },
 		mNext { nullptr },
-		mIsDeleted { new bool[branchingFactor] }
+		mIsDeleted { new char[(branchingFactor + 7) / 8] }
 	{};
 	OrderedMapNode(const OrderedMapNode& other) = delete;
 	OrderedMapNode(OrderedMapNode&& other) :
@@ -67,7 +83,7 @@ public:
 		std::swap(a.mNext, b.mNext);
 	}
 
-	OrderedMapNode* set_value(K key, OrderedMapNodeValue<K, V> value, size_t branchingFactor);
+	OrderedMapNode* set_value(K key, OrderedMapNodeChild<K, V> value, size_t branchingFactor);
 
 	void print(std::ostream& out = std::cout, int depth = 0)
 	{
@@ -77,7 +93,7 @@ public:
 		if (mIsLeafNode) {
 			for (size_t i = 0; i < mSize; i++) {
 				for (int j = 0; j < depth; j++) out << "    ";
-				out << mKeys[i] << ": " << mValues[i].value << std::endl;
+				out << mKeys[i] << ": " << mChildren[i].value.value << std::endl;
 			}
 		}
 		else {
@@ -87,7 +103,7 @@ public:
 					out << " (" << mKeys[i] << ")" << std::endl;
 				else
 					out << "> " << mKeys[i] << std::endl;
-				mValues[i].node->print(out, depth + 1);
+				mChildren[i].node->print(out, depth + 1);
 			}
 		}
 		if (depth == 0) {
@@ -99,9 +115,9 @@ public:
 	size_t child_position(K key) const {
 		if (mSize <= 1 || key < mKeys[1]) return 0;
 
-		size_t left = 1;
-		size_t right = mSize - 1;
-		size_t mid;
+		ptrdiff_t left = 1;
+		ptrdiff_t right = mSize - 1;
+		ptrdiff_t mid;
 		while (right > left) {
 			mid = (left + right + 1) / 2;
 			if (key < mKeys[mid]) {
@@ -118,17 +134,20 @@ public:
 		if (mIsLeafNode) {
 			return mKeys[0];
 		}
-		return mValues[0].node->min_key();
+		return mChildren[0].node->min_key();
+	}
+
+	bool is_key_deleted() {
+
 	}
 
 	~OrderedMapNode() {
 		if (!mIsLeafNode) {
 			for (size_t i = 0; i < mSize; i++) {
-				delete mValues[i].node;
+				delete mChildren[i].node;
 			}
 		}
-
-		delete[] mValues;
+		delete[] mChildren;
 		delete[] mKeys;
 	};
 };
@@ -145,12 +164,12 @@ public:
 	public:
 		using iterator_category = std::forward_iterator_tag;
 		using difference_type = std::ptrdiff_t;
-		using value_type = struct { K& first; V& second; bool isDeleted; };
+		using value_type = struct { K first; V second; bool isDeleted; };
 		using pointer = value_type*;
 		using reference = value_type&; 
 
-		Iterator(K& key, V& value, const OrderedMapNode<K, V>* parent) : 
-			ptr{ value_type { key, value, false } },
+		Iterator(K key, OrderedMapNodeValue<V> value, const OrderedMapNode<K, V>* parent) :
+			ptr{ value_type { key, value.value, value.isDeleted } },
 			parent { parent },
 			keyIndex { 0 }
 		{
@@ -179,7 +198,7 @@ public:
 				return *this;
 			}
 			ptr.first = parent->mKeys[keyIndex];
-			ptr.second = parent->mValues[keyIndex].value;
+			ptr.second = parent->mChildren[keyIndex].value.value;
 			return *this; 
 		}
 
@@ -230,33 +249,34 @@ public:
 	{
 		if (mRoot->mSize == 0) return end();
 		auto curr = mRoot;
-		while (!curr->mIsLeafNode) curr = curr->mValues[0].node;
-		return Iterator(curr->mKeys[0], curr->mValues[0].value, curr);
+		while (!curr->mIsLeafNode) curr = curr->mChildren[0].node;
+		return Iterator(curr->mKeys[0], curr->mChildren[0].value, curr);
 	}
 
 	Iterator end() const
 	{
-		return Iterator(mRoot->mKeys[0], mRoot->mValues[0].value, nullptr);
+		return Iterator(mRoot->mKeys[mRoot->mSize], mRoot->mChildren[mRoot->mSize].value, nullptr);
 	}
 
-	V& at(K key) const 
+	V& at(K key, bool* isDeleted = nullptr) const 
 	{
 		auto curr = mRoot;
 		while (true) {
 			if (!curr || curr->mSize == 0) throw std::out_of_range("Value not found");
 			if (!curr->mIsLeafNode) {
 				size_t i = curr->child_position(key);
-				curr = curr->mValues[i].node;
+				curr = curr->mChildren[i].node;
 			}
 			else {
-				size_t left = 0;
-				size_t right = curr->mSize - 1;
-				size_t mid;
+				ptrdiff_t left = 0;
+				ptrdiff_t right = curr->mSize - 1;
+				ptrdiff_t mid;
 
 				while (left <= right) {
 					mid = (left + right) / 2;
 					if (key == curr->mKeys[mid]) {
-						return curr->mValues[mid].value;
+						if (isDeleted) *isDeleted = curr->mChildren[mid].value.isDeleted;
+						return curr->mChildren[mid].value.value;
 					}
 					else if (key < curr->mKeys[mid]) {
 						right = mid - 1;
@@ -267,6 +287,38 @@ public:
 				}
 				throw std::out_of_range("Value not found");
 			}
+		}
+	}
+
+	bool del(K key)
+	{
+		auto curr = mRoot;
+		while (true) {
+			if (!curr || curr->mSize == 0) return false;
+			if (!curr->mIsLeafNode) {
+				size_t i = curr->child_position(key);
+				curr = curr->mChildren[i].node;
+			}
+			else {
+				ptrdiff_t left = 0;
+				ptrdiff_t right = curr->mSize - 1;
+				ptrdiff_t mid;
+
+				while (left <= right) {
+					mid = (left + right) / 2;
+					if (key == curr->mKeys[mid]) {
+						curr->mChildren[mid].value.isDeleted = true;
+						return true;
+					}
+					else if (key < curr->mKeys[mid]) {
+						right = mid - 1;
+					}
+					else {
+						left = mid + 1;
+					}
+				}
+				return false;
+			} 
 		}
 	}
 
@@ -285,7 +337,7 @@ private:
 
 template<typename K, typename V>
 	requires std::totally_ordered<K>
-OrderedMapNode<K, V>* OrderedMapNode<K, V>::set_value(K key, OrderedMapNodeValue<K, V> value, size_t branchingFactor)
+OrderedMapNode<K, V>* OrderedMapNode<K, V>::set_value(K key, OrderedMapNodeChild<K, V> value, size_t branchingFactor)
 {
 	// linear-time insertion
 	// First determine the insertion point
@@ -293,7 +345,7 @@ OrderedMapNode<K, V>* OrderedMapNode<K, V>::set_value(K key, OrderedMapNodeValue
 	for (i = 0; i < mSize && mKeys[i] < key; i++);
 	if (mIsLeafNode && i < mSize && mKeys[i] == key) {
 		// Value exists, set it
-		mValues[i] = value;
+		mChildren[i] = value;
 		return nullptr;
 	}
 
@@ -311,20 +363,20 @@ OrderedMapNode<K, V>* OrderedMapNode<K, V>::set_value(K key, OrderedMapNodeValue
 			// First, copy the second half over to the new node
 			for (size_t j = half - 1; j < mSize; j++, k++) {
 				newNode->mKeys[k] = mKeys[j];
-				newNode->mValues[k] = mValues[j];
-				if (!mIsLeafNode) mValues[j].node = nullptr;
+				newNode->mChildren[k] = mChildren[j];
+				if (!mIsLeafNode) mChildren[j].node = nullptr;
 			}
 			if (half >= 2) {
 				// Shift down the necessary portion of the first half (which is our current node)
 				for (size_t j = half - 2; j >= i; j--) {
 					mKeys[j + 1] = mKeys[j];
-					mValues[j + 1] = mValues[j];
+					mChildren[j + 1] = mChildren[j];
 					if (j == 0) break; // prevent negative integer overflow
 				}
 			}
 			// Insert the new value in the first half
 			mKeys[i] = key;
-			mValues[i] = value;
+			mChildren[i] = value;
 
 			newNode->mSize = k;
 		}
@@ -333,18 +385,18 @@ OrderedMapNode<K, V>* OrderedMapNode<K, V>::set_value(K key, OrderedMapNodeValue
 			for (size_t j = half; j < i; j++, k++) {
 				// Copy over the part of the second half that comes before the value
 				newNode->mKeys[k] = mKeys[j];
-				newNode->mValues[k] = mValues[j];
-				if (!mIsLeafNode) mValues[j].node = nullptr;
+				newNode->mChildren[k] = mChildren[j];
+				if (!mIsLeafNode) mChildren[j].node = nullptr;
 			}
 			// Add the new value to the new node
 			newNode->mKeys[k] = key;
-			newNode->mValues[k] = value;
+			newNode->mChildren[k] = value;
 			k++;
 			// Copy the remainder of the second half
 			for (size_t j = i; j < mSize; j++, k++) {
 				newNode->mKeys[k] = mKeys[j];
-				newNode->mValues[k] = mValues[j];
-				if (!mIsLeafNode) mValues[j].node = nullptr;
+				newNode->mChildren[k] = mChildren[j];
+				if (!mIsLeafNode) mChildren[j].node = nullptr;
 			}
 
 			newNode->mSize = k;
@@ -363,12 +415,12 @@ OrderedMapNode<K, V>* OrderedMapNode<K, V>::set_value(K key, OrderedMapNodeValue
 		if (mSize > 0) {
 			for (size_t j = mSize - 1; j >= i; j--) {
 				mKeys[j + 1] = mKeys[j];
-				mValues[j + 1] = mValues[j];
+				mChildren[j + 1] = mChildren[j];
 				if (j == 0) break;	// prevent negative integer overflow
 			}
 		}
 		mKeys[i] = key;
-		mValues[i] = value;
+		mChildren[i] = value;
 		mSize++;
 	}
 
@@ -382,7 +434,7 @@ void OrderedMap<K, V>::set(K key, V value)
 {
 	if (DEBUG_MODE)
 		std::cout << std::endl << "TOP INSERT " << key << " =========================" << std::endl;
-	OrderedMapNodeValue<K, V> newValue = std::move(OrderedMapNodeValue<K, V> {.value = value });
+	OrderedMapNodeChild<K, V> newValue = OrderedMapNodeChild<K, V>( { .isDeleted = false, .value = value });
 
 	OrderedMapNode<K, V>** stack = new OrderedMapNode<K, V>*[mHeight+1];
 
@@ -395,7 +447,7 @@ void OrderedMap<K, V>::set(K key, V value)
 		size_t j = curr->child_position(key);
 
 		curr->mKeys[j] = std::min(curr->mKeys[j], key);
-		curr = curr->mValues[j].node;
+		curr = curr->mChildren[j].node;
 		stack[i] = curr;
 	};
 
@@ -409,7 +461,7 @@ void OrderedMap<K, V>::set(K key, V value)
 		i -= 1;
 		OrderedMapNode<K, V>* parent = stack[i];
 		K newKey = newNode->min_key();
-		newValue = std::move(OrderedMapNodeValue<K, V> {.node = newNode });
+		OrderedMapNodeChild<K, V> newValue = OrderedMapNodeChild<K, V>(newNode);
 		newNode = parent->set_value(newKey, newValue, mBranchingFactor);
 	}
 
@@ -417,8 +469,8 @@ void OrderedMap<K, V>::set(K key, V value)
 		OrderedMapNode<K, V>* newRoot = new OrderedMapNode<K, V>(mBranchingFactor);
 		newRoot->mSize = 2;
 		newRoot->mIsLeafNode = false;
-		newRoot->mValues[0].node = mRoot;
-		newRoot->mValues[1].node = newNode;
+		newRoot->mChildren[0].node = mRoot;
+		newRoot->mChildren[1].node = newNode;
 		newRoot->mKeys[0] = mRoot->min_key();
 		newRoot->mKeys[1] = newNode->min_key();
 
