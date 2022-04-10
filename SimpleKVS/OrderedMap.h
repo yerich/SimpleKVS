@@ -2,10 +2,9 @@
 #include <concepts>
 #include <iostream>
 #include <stdexcept>
+#include <math.h>
 
 constexpr size_t DEFAULT_BRANCHING_FACTOR = 3;
-
-bool DEBUG_MODE = false;
 
 template<typename K, typename V>
 	requires std::totally_ordered<K>
@@ -260,7 +259,7 @@ public:
 	{
 		auto curr = mRoot;
 		while (true) {
-			if (!curr || curr->mSize == 0) throw std::out_of_range("Value not found");
+			if (!curr || curr->mSize == 0) throw std::out_of_range("Key not found");
 			if (!curr->mIsLeafNode) {
 				size_t i = curr->child_position(key);
 				curr = curr->mChildren[i].node;
@@ -283,7 +282,7 @@ public:
 						left = mid + 1;
 					}
 				}
-				throw std::out_of_range("Value not found");
+				throw std::out_of_range("Key not found");
 			}
 		}
 	}
@@ -320,7 +319,7 @@ public:
 		}
 	}
 
-	void set(K key, V value); 
+	void set(K key, V value, bool setAsDeleted = false); 
 	void print(std::ostream& out = std::cout) const
 	{
 		mRoot->print(out);
@@ -428,11 +427,9 @@ OrderedMapNode<K, V>* OrderedMapNode<K, V>::set_value(K key, OrderedMapNodeChild
 
 template<typename K, typename V>
 	requires std::totally_ordered<K>
-void OrderedMap<K, V>::set(K key, V value)
+void OrderedMap<K, V>::set(K key, V value, bool setAsDeleted)
 {
-	if (DEBUG_MODE)
-		std::cout << std::endl << "TOP INSERT " << key << " =========================" << std::endl;
-	OrderedMapNodeChild<K, V> newValue = OrderedMapNodeChild<K, V>( { .isDeleted = false, .value = value });
+	OrderedMapNodeChild<K, V> newValue = OrderedMapNodeChild<K, V>( { .isDeleted = setAsDeleted, .value = value });
 
 	OrderedMapNode<K, V>** stack = new OrderedMapNode<K, V>*[mHeight+1];
 

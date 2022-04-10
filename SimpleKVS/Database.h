@@ -5,7 +5,7 @@
 class Collection
 {
 public:
-	Collection(std::string name) : 
+	Collection(std::string name = "") :
 		mName { name },
 		mCache(100)	// TODO determine buffer size based on system cache size
 	{}
@@ -36,6 +36,10 @@ public:
 	};
 
 	std::string name() const { return mName; }
+
+	void set(std::string key, std::string value);
+	const std::string get(std::string value);
+	void del(std::string key);
 private:
 	std::string mName;
 	std::vector<OrderedMap<std::string, std::string>*> mWriteBuffers;
@@ -44,7 +48,19 @@ private:
 
 class Database
 {
+public:
+	Collection& addCollection(std::string collectionName) {
+		if (mCollections.contains(collectionName)) {
+			return mCollections[collectionName];
+		}
+		mCollections[collectionName] = Collection(collectionName);
+		return mCollections[collectionName];
+	}
+
+	Collection& getCollection(std::string collectionName) {
+		return mCollections.at(collectionName);
+	}
 private:
-	std::unordered_map<std::string, Collection> collections;
+	std::unordered_map<std::string, Collection> mCollections;
 };
 
