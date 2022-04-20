@@ -1,8 +1,13 @@
+#define _WIN32_WINNT 0x0601
+
 #include <iostream>
-#include "OrderedMap.h"
+#include <boost/asio.hpp>
 #include <string>
+
+#include "OrderedMap.h"
 #include "InputParser.h"
 #include "Database.h"
+#include "Server.h"
 
 using std::cout;
 using std::endl;
@@ -27,7 +32,14 @@ int main(int argc, char* argv[]) {
     Collection& collection = db.getCollection("test");
 
     collection.set("test1", "value1");
-    cout << collection.get("test1") << endl;
 
+    try
+    {
+        boost::asio::io_context io_context;
+        Server server(io_context);
+        io_context.run();
+    } catch (std::exception& e) {
+        std::cerr << e.what() << std::endl;
+    }
     return 0;
 }

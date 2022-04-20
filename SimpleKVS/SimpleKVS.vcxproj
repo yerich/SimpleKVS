@@ -142,12 +142,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Database.cpp" />
+    <ClCompile Include="Server.cpp" />
     <ClCompile Include="SimpleKVS.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Database.h" />
     <ClInclude Include="InputParser.h" />
     <ClInclude Include="OrderedMap.h" />
+    <ClInclude Include="Server.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
